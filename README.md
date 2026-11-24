@@ -119,6 +119,14 @@ callback 任何失敗（例如 `state` 不符、使用者沒有該應用程式�
 
 已在 authentik 2026.8.6 實測：只要該網址已登記為 Provider 的 Redirect URI，end-session 就會遵守 `post_logout_redirect_uri`。
 
+#### 已知問題：登出後停在空白頁（authentik 2026.8.x）
+
+重現步驟：A、B 都已登入 → 在 A 登出（回到 authentik 登入頁，但不登入）→ 到 B 按「登出」→ 停在 authentik 的 end-session 空白頁。
+
+- **原因**：authentik 的 end-session 只要看到瀏覽器的 authentik session 裡有未完成的 flow（這裡是 A 開到一半的登入頁），就直接回應空白的 `200`，不執行登出 flow，也不導回網站。見 [goauthentik/authentik#25545](https://github.com/goauthentik/authentik/issues/25545)。
+- **修正**：[PR #26565](https://github.com/goauthentik/authentik/pull/26565) 已合併，預計在 authentik 2026.11.0 釋出，2026.8.x 不會修正。釋出後更新 `authentik/docker-compose.yml` 的 `AUTHENTIK_TAG`，或在 `authentik/.env` 設定 `AUTHENTIK_TAG`。
+- **實際影響**：B 的後端在導向 authentik 前已清除 B 的 session，所以 B 其實已經登出。遇到時手動開啟 http://localhost:3002/ 即可，會正常導向 authentik 登入頁。
+
 ## SSO 示範
 
 1. 開啟 site-a（http://localhost:3001）→ 自動導向 authentik 登入頁。輸入帳密 → 回到 site-a 顯示使用者資訊。

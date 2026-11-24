@@ -80,7 +80,8 @@ callback 的所有失敗都會導向 `/?auth_error=<code>`。前端在模組載�
 - [callback 成功但瀏覽器沒有存下 session cookie（例如被瀏覽器阻擋），`/api/me` 一直回 401] → 會在網站與 authentik 之間無限跳轉。本機 demo 的 cookie 是同源、`SameSite=Lax`，風險低；不另外加防護，於 README 的疑難排解提及
 - [登出 A 站後，B 站的本地 session 仍有效] → 即使 authentik session 已結束，B 站在 8 小時內仍顯示已登入。屬 Non-goal，README 註明，之後可用 back-channel logout 處理
 - [使用者在 authentik 登出頁面中途離開，authentik session 沒有結束] → 回到網站會被自動登入。這符合「authentik 有 session 就是已登入」的新模型，可接受
-- [`post_logout_redirect_uri` 不被支援] → 見決策 6
+- [`post_logout_redirect_uri` 不被支援] → 見決策 6。實測 authentik 2026.8.6 有支援，不需要退路
+- [authentik 2026.8.x 的 end-session 遇到未完成的 flow（例如另一站停在登入頁）時回應空白 `200`，不導回網站（goauthentik/authentik#25545）] → 本站 session 已先清除，實際上已登出；README 記為已知問題，等 2026.11.0 升級。不在程式中繞過，因為可行的做法都依賴 authentik 內部行為
 - [移除 `?prompt=none` 屬於 API 行為變更] → 只有本專案前端使用，一起修改即可
 
 ## Migration Plan
