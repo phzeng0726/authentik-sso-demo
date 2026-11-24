@@ -20,20 +20,13 @@ const (
 	loginFlowCookiePath = "/api/auth"
 )
 
-// Error codes sent to the frontend as /?auth_error=<code>.
+// Error codes sent to the frontend as /?auth_error=<code>. The frontend stops
+// redirecting to login while it shows one, so a failing login cannot loop.
 const (
 	authErrInvalidState = "invalid_state"
 	authErrAccessDenied = "access_denied"
 	authErrToken        = "token_error"
 )
-
-// silentNotSignedInErrors are the OIDC errors a prompt=none request returns
-// when the user would have to interact with authentik to sign in.
-var silentNotSignedInErrors = map[string]bool{
-	"login_required":       true,
-	"consent_required":     true,
-	"interaction_required": true,
-}
 
 // MeResponse is the body of GET /api/me.
 type MeResponse struct {
@@ -60,14 +53,14 @@ func NewAuthHandler(provider auth.Provider, store *auth.Store) *AuthHandler {
 }
 
 // Login starts the Authorization Code Flow: it remembers state, nonce and the
-// PKCE verifier server-side, then redirects the browser to authentik.
-// With ?prompt=none it starts a silent login; other prompt values are ignored.
+// PKCE verifier server-side, then redirects the browser to authentik, which
+// signs the user in at once or shows its login page. Query parameters such as
+// prompt are ignored.
 func (h *AuthHandler) Login(c *gin.Context) {
-	silent := c.Query("prompt") == "none"
-	pending := h.store.CreatePendingLogin(auth.RandomString(), auth.RandomString(), oauth2.GenerateVerifier(), silent)
+	pending := h.store.CreatePendingLogin(auth.RandomString(), auth.RandomString(), oauth2.GenerateVerifier())
 
 	setCookie(c, LoginFlowCookieName, pending.ID, loginFlowCookiePath, int(auth.PendingLoginTTL.Seconds()))
-	c.Redirect(http.StatusFound, h.provider.AuthCodeURL(pending.State, pending.Nonce, pending.Verifier, pending.Silent))
+	c.Redirect(http.StatusFound, h.provider.AuthCodeURL(pending.State, pending.Nonce, pending.Verifier))
 }
 
 // Callback finishes the login after authentik redirects back with a code.
@@ -82,12 +75,6 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 		return
 	}
 	if e := c.Query("error"); e != "" {
-		// A silent attempt that fails because the user is not signed in at
-		// authentik is expected: go home quietly and let the user click login.
-		if pending.Silent && silentNotSignedInErrors[e] {
-			c.Redirect(http.StatusFound, "/")
-			return
-		}
 		log.Printf("login callback: authentik returned error %q: %s", e, c.Query("error_description"))
 		redirectWithAuthError(c, authErrAccessDenied)
 		return

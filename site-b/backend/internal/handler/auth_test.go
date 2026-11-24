@@ -66,14 +66,13 @@ func cookieNamed(rec *httptest.ResponseRecorder, name string) *http.Cookie {
 // startLogin runs GET /api/auth/login and returns the login-flow cookie and
 // the state, nonce and verifier passed to the provider.
 func (s *AuthSuite) startLogin() (flow *http.Cookie, state, nonce, verifier string) {
-	return s.startLoginAt("/api/auth/login", false)
+	return s.startLoginAt("/api/auth/login")
 }
 
-// startLoginAt runs a login request at target and checks that the provider
-// is asked for a silent login exactly when wantSilent is true.
-func (s *AuthSuite) startLoginAt(target string, wantSilent bool) (flow *http.Cookie, state, nonce, verifier string) {
-	s.provider.EXPECT().AuthCodeURL(gomock.Any(), gomock.Any(), gomock.Any(), wantSilent).
-		DoAndReturn(func(st, n, v string, _ bool) string {
+// startLoginAt runs a login request at target.
+func (s *AuthSuite) startLoginAt(target string) (flow *http.Cookie, state, nonce, verifier string) {
+	s.provider.EXPECT().AuthCodeURL(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(st, n, v string) string {
 			state, nonce, verifier = st, n, v
 			return "http://idp/authorize?x=1"
 		})
@@ -92,8 +91,8 @@ func (s *AuthSuite) callback(query url.Values, cookies ...*http.Cookie) *httptes
 
 func (s *AuthSuite) TestLogin_RedirectsToProviderAndStoresPendingLogin() {
 	var gotState, gotNonce, gotVerifier string
-	s.provider.EXPECT().AuthCodeURL(gomock.Any(), gomock.Any(), gomock.Any(), false).
-		DoAndReturn(func(state, nonce, verifier string, _ bool) string {
+	s.provider.EXPECT().AuthCodeURL(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(state, nonce, verifier string) string {
 			gotState, gotNonce, gotVerifier = state, nonce, verifier
 			return "http://idp/authorize?state=" + state
 		})
@@ -119,26 +118,20 @@ func (s *AuthSuite) TestLogin_RedirectsToProviderAndStoresPendingLogin() {
 	s.Equal(gotState, pending.State)
 	s.Equal(gotNonce, pending.Nonce)
 	s.Equal(gotVerifier, pending.Verifier)
-	s.False(pending.Silent)
 }
 
-func (s *AuthSuite) TestLogin_PromptNone_StartsSilentLogin() {
-	flow, state, _, _ := s.startLoginAt("/api/auth/login?prompt=none", true)
-
-	pending, ok := s.store.TakePendingLogin(flow.Value)
-	s.Require().True(ok)
-	s.True(pending.Silent)
-	s.Equal(state, pending.State)
-}
-
-func (s *AuthSuite) TestLogin_OtherPromptValues_AreIgnored() {
-	for _, target := range []string{"/api/auth/login?prompt=login", "/api/auth/login?prompt=", "/api/auth/login?prompt=NONE"} {
+// The provider mock only accepts (state, nonce, verifier), so a prompt query
+// parameter has no way to reach authentik; the login still starts normally.
+func (s *AuthSuite) TestLogin_PromptQuery_IsIgnored() {
+	for _, target := range []string{"/api/auth/login?prompt=none", "/api/auth/login?prompt=login"} {
 		s.Run(target, func() {
-			flow, _, _, _ := s.startLoginAt(target, false)
+			flow, state, nonce, verifier := s.startLoginAt(target)
 
 			pending, ok := s.store.TakePendingLogin(flow.Value)
 			s.Require().True(ok)
-			s.False(pending.Silent)
+			s.Equal(state, pending.State)
+			s.Equal(nonce, pending.Nonce)
+			s.Equal(verifier, pending.Verifier)
 		})
 	}
 }
@@ -236,61 +229,19 @@ func (s *AuthSuite) TestCallback_ProviderError_ReturnsAccessDenied() {
 	s.assertAuthError(rec, "access_denied")
 }
 
-func (s *AuthSuite) TestCallback_SilentNotSignedIn_GoesHomeWithoutError() {
+// Errors that a prompt=none login used to treat as "not signed in" are now
+// ordinary failures: going home without auth_error would make the frontend
+// redirect to login again and loop.
+func (s *AuthSuite) TestCallback_NotSignedInErrors_ReturnAccessDenied() {
 	for _, e := range []string{"login_required", "consent_required", "interaction_required"} {
 		s.Run(e, func() {
-			flow, state, _, _ := s.startLoginAt("/api/auth/login?prompt=none", true)
+			flow, state, _, _ := s.startLogin()
 
 			rec := s.callback(url.Values{"error": {e}, "state": {state}}, flow)
 
-			s.Equal(http.StatusFound, rec.Code)
-			s.Equal("/", rec.Header().Get("Location"))
-			s.Nil(cookieNamed(rec, "site_b_session"))
-			cleared := cookieNamed(rec, "site_b_login")
-			s.Require().NotNil(cleared)
-			s.Equal(-1, cleared.MaxAge)
+			s.assertAuthError(rec, "access_denied")
 		})
 	}
-}
-
-func (s *AuthSuite) TestCallback_SilentOtherError_ReturnsAccessDenied() {
-	flow, state, _, _ := s.startLoginAt("/api/auth/login?prompt=none", true)
-
-	rec := s.callback(url.Values{"error": {"server_error"}, "state": {state}}, flow)
-
-	s.assertAuthError(rec, "access_denied")
-}
-
-func (s *AuthSuite) TestCallback_InteractiveLoginRequired_ReturnsAccessDenied() {
-	flow, state, _, _ := s.startLogin()
-
-	rec := s.callback(url.Values{"error": {"login_required"}, "state": {state}}, flow)
-
-	s.assertAuthError(rec, "access_denied")
-}
-
-func (s *AuthSuite) TestCallback_SilentStateMismatch_ReturnsInvalidState() {
-	flow, _, _, _ := s.startLoginAt("/api/auth/login?prompt=none", true)
-
-	rec := s.callback(url.Values{"error": {"login_required"}, "state": {"forged"}}, flow)
-
-	s.assertAuthError(rec, "invalid_state")
-}
-
-func (s *AuthSuite) TestCallback_SilentSuccess_CreatesSession() {
-	flow, state, nonce, _ := s.startLoginAt("/api/auth/login?prompt=none", true)
-	s.provider.EXPECT().Exchange(gomock.Any(), "code-1", gomock.Any()).
-		Return(auth.IDToken{Raw: "raw-id-token", User: alice, Nonce: nonce}, nil)
-
-	rec := s.callback(url.Values{"code": {"code-1"}, "state": {state}}, flow)
-
-	s.Equal(http.StatusFound, rec.Code)
-	s.Equal("/", rec.Header().Get("Location"))
-	sc := cookieNamed(rec, "site_b_session")
-	s.Require().NotNil(sc)
-	sess, ok := s.store.GetSession(sc.Value)
-	s.Require().True(ok)
-	s.Equal(alice, sess.User)
 }
 
 func (s *AuthSuite) TestCallback_ExchangeFails_ReturnsTokenError() {
@@ -345,18 +296,18 @@ func (s *AuthSuite) TestMe_NotLoggedIn_ReturnsUnauthorized() {
 
 // --- logout ---
 
-func (s *AuthSuite) TestLogout_WithSession_DeletesSessionAndReturnsHintedURL() {
+func (s *AuthSuite) TestLogout_WithSession_DeletesSessionAndReturnsURLWithHintAndRedirect() {
 	sess := s.store.CreateSession(alice, "raw-id-token")
 	other := s.store.CreateSession(alice, "other-token")
 	s.provider.EXPECT().EndSessionURL("raw-id-token").
-		Return("http://idp/end-session/?id_token_hint=raw-id-token")
+		Return("http://idp/end-session/?id_token_hint=raw-id-token&post_logout_redirect_uri=http%3A%2F%2Flocalhost%3A3002%2F")
 
 	rec := s.do(http.MethodPost, "/api/auth/logout", &http.Cookie{Name: "site_b_session", Value: sess.ID})
 
 	s.Equal(http.StatusOK, rec.Code)
 	var body handler.LogoutResponse
 	s.Require().NoError(json.Unmarshal(rec.Body.Bytes(), &body))
-	s.Equal(handler.LogoutResponse{LogoutURL: "http://idp/end-session/?id_token_hint=raw-id-token"}, body)
+	s.Equal(handler.LogoutResponse{LogoutURL: "http://idp/end-session/?id_token_hint=raw-id-token&post_logout_redirect_uri=http%3A%2F%2Flocalhost%3A3002%2F"}, body)
 
 	_, ok := s.store.GetSession(sess.ID)
 	s.False(ok)

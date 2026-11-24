@@ -76,6 +76,7 @@ make dev
 | `SITE_NAME` | 網站名稱，由 `GET /api/info` 回傳 | `Site A` | `Site B` |
 | `OIDC_ISSUER` | authentik 應用程式的 issuer | `http://localhost:9000/application/o/site-a/` | `http://localhost:9000/application/o/site-b/` |
 | `OIDC_REDIRECT_URL` | 登入完成後的 callback，須與 authentik 設定一致 | `http://localhost:3001/api/auth/callback` | `http://localhost:3002/api/auth/callback` |
+| `OIDC_POST_LOGOUT_REDIRECT_URL` | 登出後 authentik 導回的網址（`post_logout_redirect_uri`），須登記在 authentik | `http://localhost:3001/` | `http://localhost:3002/` |
 | `OIDC_CLIENT_ID` | **必填**，authentik provider 的 Client ID | — | — |
 | `OIDC_CLIENT_SECRET` | **必填**，authentik provider 的 Client Secret | — | — |
 
@@ -85,38 +86,46 @@ make dev
 |--------|------|--------|------|
 | GET | `/api/health` | 否 | `{"status":"ok"}` |
 | GET | `/api/info` | 否 | `{"name":"<SITE_NAME>"}` |
-| GET | `/api/auth/login` | 否 | 302 導向 authentik 登入；加上 `?prompt=none` 為靜默登入 |
+| GET | `/api/auth/login` | 否 | 302 導向 authentik 登入 |
 | GET | `/api/auth/callback` | 否 | 登入完成後由 authentik 導回；成功 302 到 `/`，失敗 302 到 `/?auth_error=<code>` |
-| POST | `/api/auth/logout` | 否 | 清除本站 session，回傳 `{"logout_url":"..."}` |
+| POST | `/api/auth/logout` | 否 | 清除本站 session，回傳 `{"logout_url":"..."}`；有 session 時網址帶 `id_token_hint` 與 `post_logout_redirect_uri` |
 | GET | `/api/me` | 是 | `{"sub","username","name","email"}`；未登入回 401 `{"error":"unauthorized"}` |
 
 ## 登入流程
 
 兩個網站都使用 OIDC Authorization Code Flow，由後端處理（BFF 模式），token 不會出現在瀏覽器的 JavaScript 中：
 
-1. 前端按「登入」→ 整頁導向後端 `/api/auth/login`。
+網站本身沒有「登入」按鈕，未登入時一律交給 authentik：
+
+1. 前端呼叫 `/api/me` 得到 401 → 畫面顯示「前往登入頁…」並整頁導向後端 `/api/auth/login`。
 2. 後端產生 `state`（防 CSRF）、`nonce`（防 ID token 重放）、PKCE verifier（防授權碼被攔截後兌換），存在 server 端，再導向 authentik。
-3. 使用者在 authentik 登入後，authentik 帶著授權碼導回 `/api/auth/callback`。
-4. 後端比對 `state`、用 PKCE verifier 換 token、驗證 ID token（簽章、issuer、audience、到期時間、nonce），建立 session 並設定 cookie。
+3. authentik 判斷登入狀態：
+   - **已有 authentik session**（例如剛在另一個網站登入）：不顯示任何畫面，直接帶授權碼導回。
+   - **沒有 session**：顯示 authentik 登入頁，登入後帶授權碼導回。
+4. authentik 導回 `/api/auth/callback`。每個網站只用自己的 `OIDC_REDIRECT_URL` 發請求，所以從 site-a 開始的登入一定回到 site-a。
+5. 後端比對 `state`、用 PKCE verifier 換 token、驗證 ID token（簽章、issuer、audience、到期時間、nonce），建立 session 並設定 cookie，導回 `/`。
 
 Session 存在後端記憶體，8 小時到期，後端重啟會清空。兩個網站的 cookie 名稱不同（`site_a_session`、`site_b_session`），因為同一個 `localhost` 不同 port 會共用 cookie。
 
-### 靜默登入（`prompt=none`）
+### 避免無限轉址
 
-未登入時，前端會自動整頁導向 `/api/auth/login?prompt=none`（畫面顯示「檢查登入狀態中…」），請 authentik「不要顯示任何畫面，只告訴我使用者是否已登入」：
+callback 任何失敗（例如 `state` 不符、使用者沒有該應用程式的權限）都會導向 `/?auth_error=<code>`。前端看到 `auth_error` 時不自動導向，改為顯示錯誤訊息與「重新登入」按鈕；重新整理頁面也會再試一次。
 
-- **authentik 已有登入 session**（例如剛在另一個網站登入）：直接導回並完成登入，不需按任何按鈕。
-- **沒有 authentik session**：authentik 回傳 `login_required`，後端靜默導回首頁，頁面顯示「登入」按鈕。
+### 登出
 
-每個分頁只嘗試一次（記在 `sessionStorage`），避免無限轉址；按「登出」時也會記下，回到網站不會立刻又自動登入；登入成功後清除記號，session 到期時可再靜默續登。
+1. 前端呼叫 `POST /api/auth/logout`，後端清除本站 session，回傳 authentik 的 end-session 網址（帶 `id_token_hint` 與 `post_logout_redirect_uri`）。
+2. 瀏覽器導向 authentik，執行 Provider 的 Invalidation flow（`default-invalidation-flow`）結束 authentik session。
+3. authentik 導回 `OIDC_POST_LOGOUT_REDIRECT_URL`（本站首頁）→ `/api/me` 401 → 自動導向 authentik 登入頁 → 登入後回到本站。
+
+已在 authentik 2026.8.6 實測：只要該網址已登記為 Provider 的 Redirect URI，end-session 就會遵守 `post_logout_redirect_uri`。
 
 ## SSO 示範
 
-1. 開啟 site-a（http://localhost:3001）→ 自動檢查登入狀態後顯示「登入」按鈕。按「登入」，在 authentik 輸入帳密 → 回到 site-a 顯示使用者資訊。
-2. 開新分頁開啟 site-b（http://localhost:3002）→ **不需按任何按鈕、不需輸入帳密**，自動登入並顯示使用者資訊。這是因為瀏覽器在 authentik 已有登入 session，靜默登入直接成功。
-3. 在 site-a 按「登出」→ site-a 的 session 被清除，並導向 authentik 結束 authentik 的登入 session。
-4. 回到 site-b 重新整理 → **仍是登入狀態**。登出只會清除當前網站的 session，不會同步到另一個網站。
-5. 回到 site-a → 顯示「登入」按鈕，不會自動登入。
+1. 開啟 site-a（http://localhost:3001）→ 自動導向 authentik 登入頁。輸入帳密 → 回到 site-a 顯示使用者資訊。
+2. 開新分頁開啟 site-b（http://localhost:3002）→ **不需輸入帳密**，畫面一閃即顯示使用者資訊。這是因為瀏覽器在 authentik 已有登入 session。
+3. 在 site-a 按「登出」→ site-a 的 session 被清除，authentik session 結束，回到 site-a 後再被導向 authentik 登入頁。
+4. 回到 site-b 重新整理 → **仍是登入狀態**。登出不會同步到另一個網站，site-b 自己的 session 在 8 小時內仍有效（同步登出需要 authentik 的 back-channel logout，本專案未實作）。
+5. 在 site-b 的分頁開始登入（例如等 site-b session 過期，或清掉 `site_b_session` cookie）→ 登入後回到 site-b，而不是 site-a。
 
 ## 測試
 
@@ -157,12 +166,14 @@ make authentik-up
 | Authorization flow | `default-provider-authorization-implicit-consent` | 同左 | 登入後不顯示授權確認頁，第二個網站可直接登入 |
 | Client type | Confidential | 同左 | 後端持有 client secret 換 token |
 | Redirect URI（Strict） | `http://localhost:3001/api/auth/callback` | `http://localhost:3002/api/auth/callback` | 經前端 port 走 Vite proxy，session cookie 落在網站自己的網域 |
+| Redirect URI（Strict，登出用） | `http://localhost:3001/` | `http://localhost:3002/` | 允許登出後導回網站（`post_logout_redirect_uri`）；若每筆可選類型，選 Logout |
+| Invalidation flow（Advanced flow settings） | `default-invalidation-flow` | 同左 | 登出時結束 authentik session；預設的 `default-provider-invalidation-flow` 只結束該應用程式的 session，回到網站會被自動登入 |
 | Signing key | `authentik Self-signed Certificate` | 同左 | ID token 以 RS256 簽章，後端用公開金鑰（JWKS）驗證 |
 | Scopes | `openid`、`email`、`profile` | 同左 | 取得使用者帳號、名稱、email |
 
 建立後將 **Client ID**、**Client Secret** 填入對應後端的 `.env`。
 
-> 可自動化：authentik blueprint 定義 provider 與 application；client secret 可從環境變數讀取，與網站的 `.env` 共用同一份設定，就不需手動複製。需要在 `authentik/docker-compose.yml` 額外掛載 blueprints 資料夾。
+> 可自動化：authentik blueprint 定義 provider 與 application；client secret 可從環境變數讀取，與網站的 `.env` 共用同一份設定，就不需手動複製。需要在 `authentik/docker-compose.yml` 額外掛載 blueprints 資料夾。Invalidation flow 可在 blueprint 寫 `invalidation_flow: !Find [authentik_flows.flow, [slug, default-invalidation-flow]]`；已建立的 Provider 也可用 API `PATCH /api/v3/providers/oauth2/{pk}/` 修改 `invalidation_flow` 與 `redirect_uris`。
 
 ### 4. 存取控制（選用）
 

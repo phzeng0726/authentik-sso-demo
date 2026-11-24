@@ -42,17 +42,17 @@ func (m *MockProvider) EXPECT() *MockProviderMockRecorder {
 }
 
 // AuthCodeURL mocks base method.
-func (m *MockProvider) AuthCodeURL(state, nonce, verifier string, silent bool) string {
+func (m *MockProvider) AuthCodeURL(state, nonce, verifier string) string {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "AuthCodeURL", state, nonce, verifier, silent)
+	ret := m.ctrl.Call(m, "AuthCodeURL", state, nonce, verifier)
 	ret0, _ := ret[0].(string)
 	return ret0
 }
 
 // AuthCodeURL indicates an expected call of AuthCodeURL.
-func (mr *MockProviderMockRecorder) AuthCodeURL(state, nonce, verifier, silent any) *gomock.Call {
+func (mr *MockProviderMockRecorder) AuthCodeURL(state, nonce, verifier any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AuthCodeURL", reflect.TypeOf((*MockProvider)(nil).AuthCodeURL), state, nonce, verifier, silent)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AuthCodeURL", reflect.TypeOf((*MockProvider)(nil).AuthCodeURL), state, nonce, verifier)
 }
 
 // EndSessionURL mocks base method.
