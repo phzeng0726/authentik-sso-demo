@@ -4,7 +4,7 @@
 
 .PHONY: help install dev site-a site-b \
 	site-a-backend site-a-frontend site-b-backend site-b-frontend \
-	authentik-up authentik-down authentik-logs authentik-check test
+	authentik-up authentik-down authentik-logs authentik-check create-users test
 
 AUTHENTIK_URL = http://localhost:9000
 
@@ -22,7 +22,8 @@ help:
 	@echo   authentik-down    Stop authentik
 	@echo   authentik-logs    Follow authentik logs
 	@echo   authentik-check   Check the OIDC discovery and JWKS of both sites
-	@echo   test              Run backend unit tests for both sites
+	@echo   create-users      Create authentik users from tools/create-users/users.csv
+	@echo   test              Run unit tests of both backends and tools
 
 install:
 	cd site-a/frontend && pnpm install
@@ -68,6 +69,11 @@ authentik-check:
 	curl -fsS -m 5 -o NUL $(AUTHENTIK_URL)/application/o/site-b/jwks/
 	@echo site-b: discovery and JWKS OK
 
+# Needs AUTHENTIK_TOKEN in tools/create-users/.env, see env.example there.
+create-users:
+	cd tools/create-users && go run . -csv users.csv
+
 test:
 	cd site-a/backend && go test ./...
 	cd site-b/backend && go test ./...
+	cd tools/create-users && go test ./...

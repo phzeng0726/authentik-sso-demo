@@ -10,6 +10,8 @@
 │   ├── backend/      # Go + Gin API
 │   └── frontend/     # React + TypeScript + Vite + Tailwind CSS
 ├── site-b/           # 與 site-a 結構相同的另一個網站
+├── tools/
+│   └── create-users/ # 從 CSV 批次建立 authentik 使用者（Go CLI）
 └── openspec/         # OpenSpec 規格與變更提案
 ```
 
@@ -43,7 +45,8 @@
 | `make authentik-up` / `make authentik-down` | 背景啟動 / 停止 authentik |
 | `make authentik-logs` | 追蹤 authentik log |
 | `make authentik-check` | 檢查兩個網站在 authentik 的 OIDC discovery 與 JWKS 端點是否正常 |
-| `make test` | 執行兩個網站的後端單元測試 |
+| `make create-users` | 從 CSV 批次建立 authentik 使用者（見[批次建立使用者](#批次建立使用者)） |
+| `make test` | 執行兩個網站的後端與 `tools/` 的單元測試 |
 
 按 `Ctrl+C` 停止前景執行的服務。
 
@@ -161,7 +164,28 @@ make authentik-up
 
 **Directory → Users** 建立一個測試帳號，用來登入兩個網站。
 
-> 可自動化：authentik blueprint 定義使用者，或呼叫 authentik REST API。
+> 可自動化：authentik blueprint 定義使用者，或用 REST API 批次建立，見下方[批次建立使用者](#批次建立使用者)。
+
+#### 批次建立使用者
+
+`tools/create-users` 從 CSV 呼叫 authentik REST API 建立使用者：
+
+1. **Directory → Tokens and App passwords → Create** 建立 token：**Intent** 選 `API Token`，**User** 選 `akadmin`
+2. 複製 `tools/create-users/env.example` 為 `.env`，填入 `AUTHENTIK_TOKEN`
+3. 複製 `tools/create-users/users.example.csv` 為 `users.csv`，填入使用者（已 gitignore）
+4. 執行 `make create-users`
+
+CSV 欄位：
+
+| 欄位 | 必填 | 說明 |
+|------|------|------|
+| `username` | ✅ | 登入帳號，不可重複 |
+| `name` | | 顯示名稱，空白時用 `username` |
+| `email` | | |
+| `password` | | 空白時產生隨機密碼，顯示在結果表格中 |
+| `groups` | | 群組名稱，以 `;` 分隔；不存在的群組會自動建立 |
+
+已存在的帳號會略過，不會修改。任一列失敗時，其他列仍會繼續，結束碼為 1。用 Excel 存成「CSV UTF-8」也可以讀取。
 
 ### 3. 為每個網站建立 Application 與 Provider
 
