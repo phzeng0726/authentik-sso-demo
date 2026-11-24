@@ -32,3 +32,8 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Frontend (Node / Vite)
+node_modules/
+dist/
+*.local
