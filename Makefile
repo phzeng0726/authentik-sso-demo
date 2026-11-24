@@ -4,7 +4,9 @@
 
 .PHONY: help install dev site-a site-b \
 	site-a-backend site-a-frontend site-b-backend site-b-frontend \
-	authentik-up authentik-down authentik-logs test
+	authentik-up authentik-down authentik-logs authentik-check test
+
+AUTHENTIK_URL = http://localhost:9000
 
 help:
 	@echo Usage: make [target]
@@ -19,6 +21,7 @@ help:
 	@echo   authentik-up      Start authentik in the background on 9000
 	@echo   authentik-down    Stop authentik
 	@echo   authentik-logs    Follow authentik logs
+	@echo   authentik-check   Check the OIDC discovery and JWKS of both sites
 	@echo   test              Run backend unit tests for both sites
 
 install:
@@ -54,6 +57,16 @@ authentik-down:
 
 authentik-logs:
 	docker compose -f authentik/docker-compose.yml logs -f
+
+# Fails if an application slug is wrong or authentik is down. Output goes to NUL,
+# not /dev/null: curl is a native Windows program in both cmd.exe and sh.
+authentik-check:
+	curl -fsS -m 5 -o NUL $(AUTHENTIK_URL)/application/o/site-a/.well-known/openid-configuration
+	curl -fsS -m 5 -o NUL $(AUTHENTIK_URL)/application/o/site-a/jwks/
+	@echo site-a: discovery and JWKS OK
+	curl -fsS -m 5 -o NUL $(AUTHENTIK_URL)/application/o/site-b/.well-known/openid-configuration
+	curl -fsS -m 5 -o NUL $(AUTHENTIK_URL)/application/o/site-b/jwks/
+	@echo site-b: discovery and JWKS OK
 
 test:
 	cd site-a/backend && go test ./...
