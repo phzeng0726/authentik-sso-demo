@@ -78,7 +78,7 @@ backend/
 ```
 
 - `auth.Provider` 介面隔離 authentik：`AuthCodeURL(state, nonce, verifier string, silent bool)`、`Exchange(ctx, code, verifier) (IDToken, error)`、`EndSessionURL(idTokenHint)`。`silent` 為 true 時加上 `prompt=none`；`PendingLogin` 以 `Silent` 欄位記錄，供 callback 判斷。handler 測試以 `go.uber.org/mock` 產生的 mock 替代，不需要真的 authentik。
-- `auth.Store` 介面讓測試可以注入時間（`now func() time.Time`），驗證 8 小時、10 分鐘的過期邊界。
+- `auth.Store` 為 struct，以 `NewStore(now func() time.Time)` 注入時鐘，讓測試可以驗證 8 小時、10 分鐘的過期邊界；handler 直接使用 `*auth.Store`（in-memory 實作本身即可在測試中使用，不需介面）。
 - `/api/auth/logout` 只註冊 POST：避免第三方網頁用 `<img src=".../logout">` 之類的 GET 請求讓使用者被登出。
 
 ### 6. 登出流程
@@ -131,6 +131,7 @@ backend/
 ## Risks / Trade-offs
 
 - [in-memory session，後端重啟即失效] → 示範用途可接受；因 authentik session 仍在，重新按「登入」即可，不需輸入帳密。
+- [過期的 session 與 pending login 只在被讀取時刪除，未再被讀取的會留在記憶體（例如按了登入卻沒回到 callback；靜默登入讓每個新分頁都會建立一筆 pending login）] → 示範環境資料量很小，可接受；若要長時間執行，可在 `NewStore` 加上定期清理過期項目的 goroutine。
 - [Cookie 未設 `Secure`] → 僅限本機 HTTP 開發；部署時需 HTTPS 並開啟 `Secure`。
 - [兩網站共用同一把簽章金鑰] → 不影響安全性：token 的 `iss`、`aud` 各自不同，後端只接受自己的 issuer 與 client ID。
 - [登出不會同步到另一個網站] → 已列為 Non-goal，README 說明此行為。

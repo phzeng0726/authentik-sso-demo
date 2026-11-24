@@ -16,7 +16,7 @@ The backend SHALL read its settings from environment variables. Before reading t
 - **WHEN** `PORT=9100`, `SITE_NAME=Custom`, `OIDC_ISSUER=http://idp/`, `OIDC_REDIRECT_URL=http://app/cb`, `OIDC_CLIENT_ID=id`, and `OIDC_CLIENT_SECRET=secret` are set
 - **THEN** the loaded config has exactly those values
 
-#### Scenario: Optional variables unset
+#### Scenario: Variables unset
 - **WHEN** only `OIDC_CLIENT_ID=id` and `OIDC_CLIENT_SECRET=secret` are set for site-a
 - **THEN** the loaded config has port `8081`, site name `Site A`, issuer `http://localhost:9000/application/o/site-a/`, and redirect URL `http://localhost:3001/api/auth/callback`
 

@@ -39,7 +39,7 @@
 ## Impact
 
 - 修改：`site-a/backend`、`site-b/backend`（config、handler、router、main）；`site-a/frontend`、`site-b/frontend`（`App.tsx`）
-- 新增依賴（Go）：`github.com/coreos/go-oidc/v3`、`golang.org/x/oauth2`、`github.com/joho/godotenv`、`go.uber.org/mock`（測試用）
+- 新增依賴（Go）：`github.com/coreos/go-oidc/v3`、`golang.org/x/oauth2`、`github.com/joho/godotenv`、`go.uber.org/mock`（測試用）、`github.com/go-jose/go-jose/v4`（測試中簽發假的 ID token 用）
 - 新增各後端的環境變數範例檔；實際含 client secret 的 `.env` 已被 `.gitignore` 排除
 - 後端啟動時需要 authentik 正在執行（啟動時讀取 OIDC discovery）
 - 更新 `README.md`、`Makefile`、`CLAUDE.md`
