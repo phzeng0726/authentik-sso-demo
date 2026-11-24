@@ -32,7 +32,9 @@ type IDToken struct {
 type Provider interface {
 	// AuthCodeURL returns the authorization endpoint URL that starts a login
 	// with the given state, nonce and PKCE verifier (sent as an S256 challenge).
-	AuthCodeURL(state, nonce, verifier string) string
+	// When silent is true it adds prompt=none: authentik must not show any
+	// page, and either signs the user in at once or returns an error.
+	AuthCodeURL(state, nonce, verifier string, silent bool) string
 	// Exchange redeems the authorization code with the PKCE verifier, then
 	// verifies the returned ID token (signature, issuer, audience, expiry).
 	// It does not check the nonce; the caller compares IDToken.Nonce.
@@ -76,8 +78,12 @@ func NewOIDCProvider(ctx context.Context, cfg config.OIDCConfig) (*OIDCProvider,
 }
 
 // AuthCodeURL implements Provider.
-func (p *OIDCProvider) AuthCodeURL(state, nonce, verifier string) string {
-	return p.oauth.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier))
+func (p *OIDCProvider) AuthCodeURL(state, nonce, verifier string, silent bool) string {
+	opts := []oauth2.AuthCodeOption{oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier)}
+	if silent {
+		opts = append(opts, oauth2.SetAuthURLParam("prompt", "none"))
+	}
+	return p.oauth.AuthCodeURL(state, opts...)
 }
 
 // Exchange implements Provider.

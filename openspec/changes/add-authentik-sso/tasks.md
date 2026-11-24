@@ -45,3 +45,12 @@
 
 - [x] 7.1 使用者將兩個後端的 `env.example` 複製為 `.env` 並填入 client ID / secret
 - [x] 7.2 `make authentik-up` 後 `make dev`，驗證：site-a 登入需輸入帳密 → site-b 按「登入」不需輸入帳密即登入 → site-a 登出後 site-b 仍為登入狀態
+
+## 8. 靜默登入
+
+- [x] 8.1 site-a 後端：`Provider.AuthCodeURL` 新增 silent 參數、`PendingLogin` 記錄 `Silent`、`/api/auth/login` 接受 `prompt=none`（其他值忽略），重新產生 mock
+- [x] 8.2 site-a 後端：callback 對靜默嘗試的 `login_required`、`consent_required`、`interaction_required` 導回 `/`；補齊 provider、store、handler 測試（含靜默時其他錯誤、非靜默時 `login_required` 仍為 `access_denied`）
+- [x] 8.3 site-a 前端：未登入時自動靜默登入（sessionStorage 標記、`auth_error` 時不嘗試、登出時設標記、`/api/me` 200 時清除），`pnpm build` 與 `pnpm lint` 通過
+- [x] 8.4 同步到 site-b，兩站後端測試、前端 build 與 lint 通過
+- [x] 8.5 更新 README 的登入流程與 SSO 示範步驟、CLAUDE.md
+- [x] 8.6 端對端驗證（與使用者一起進行）：site-a 登入需輸入帳密 → 開 site-b 不需按任何按鈕即自動登入 → site-a 登出後 site-b 仍為登入狀態 → 回到 site-a 不會自動登入 → 未登入時開新分頁只嘗試一次靜默登入、不會無限轉址

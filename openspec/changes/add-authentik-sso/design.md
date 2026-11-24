@@ -15,7 +15,7 @@
 ## Goals / Non-Goals
 
 **Goals:**
-- 兩個網站各自完成標準的 OIDC Authorization Code Flow，並示範 SSO：在 site-a 登入後，到 site-b 按「登入」不需再輸入帳密
+- 兩個網站各自完成標準的 OIDC Authorization Code Flow，並示範 SSO：在 site-a 登入後，開啟 site-b 即自動登入，不需按「登入」也不需輸入帳密（決策 10）
 - 每個安全相關的步驟（state、nonce、PKCE、ID token 驗證、cookie 屬性）都有明確的實作與測試，方便對照學習
 - 後端單元測試遵循 `TESTING_GUIDELINES.md`
 
@@ -77,7 +77,7 @@ backend/
         └── router.go            # 註冊公開與需登入的路由
 ```
 
-- `auth.Provider` 介面隔離 authentik：`AuthCodeURL(state, nonce, verifier)`、`Exchange(ctx, code, verifier) (IDTokenClaims, rawIDToken, error)`、`EndSessionURL(idTokenHint)`。handler 測試以 `go.uber.org/mock` 產生的 mock 替代，不需要真的 authentik。
+- `auth.Provider` 介面隔離 authentik：`AuthCodeURL(state, nonce, verifier string, silent bool)`、`Exchange(ctx, code, verifier) (IDToken, error)`、`EndSessionURL(idTokenHint)`。`silent` 為 true 時加上 `prompt=none`；`PendingLogin` 以 `Silent` 欄位記錄，供 callback 判斷。handler 測試以 `go.uber.org/mock` 產生的 mock 替代，不需要真的 authentik。
 - `auth.Store` 介面讓測試可以注入時間（`now func() time.Time`），驗證 8 小時、10 分鐘的過期邊界。
 - `/api/auth/logout` 只註冊 POST：避免第三方網頁用 `<img src=".../logout">` 之類的 GET 請求讓使用者被登出。
 
@@ -103,15 +103,30 @@ backend/
 
 ### 9. 前端
 
-- 載入時呼叫 `/api/me`，以 401 / 200 決定顯示「登入」或使用者資訊；`/api/info`、`/api/health` 照舊顯示。
+- 載入時呼叫 `/api/me`，以 401 / 200 決定顯示「登入」或使用者資訊（401 時可能先自動靜默登入，見決策 10）；`/api/info`、`/api/health` 照舊顯示。
 - 「登入」以 `window.location.href = '/api/auth/login'` 導向（必須是整頁導覽，fetch 無法跟隨跨站導向到 authentik）。
 - 有 `auth_error` 時顯示對應訊息，並以 `history.replaceState` 移除參數，重新整理不會重複顯示。
 
-### 10. 不自動登入
+### 10. 靜默登入（`prompt=none`）
 
-進入網站時不自動導向 authentik，需按「登入」。SSO 的效果在於按下後 authentik 已有登入 session，直接導回網站、不需輸入帳密。
+未登入時自動向 authentik 確認登入狀態，已在另一個網站登入的使用者不需按「登入」。
 
-- **替代方案**：以 `prompt=none` 做靜默登入檢查，進入網站就自動登入。體驗更順，但多一段流程與錯誤處理，留待之後。
+1. 前端 `/api/me` 回 401，且網址沒有 `auth_error`、此分頁尚未嘗試過 → 在 `sessionStorage` 設定標記，整頁導向 `/api/auth/login?prompt=none`，畫面顯示「檢查登入狀態中…」。
+2. 後端把 `prompt=none` 帶給 authentik，並在 pending login 記錄 `Silent`。`prompt=none` 要求 authentik 不顯示任何登入或授權畫面。
+3. authentik 的回應：
+   - **已有 authentik session**：直接帶授權碼導回 callback，照一般流程建立 session。使用者只看到網址快速跳轉。
+   - **沒有 authentik session**：導回 callback 並帶 `error=login_required`（OIDC 標準亦定義 `consent_required`、`interaction_required`）。後端判斷這是靜默嘗試，導回 `/` 不帶 `auth_error`，前端因標記已設定而顯示「登入」按鈕。
+
+標記規則：
+- **每個分頁只試一次**：防止靜默失敗後 `/api/me` 仍 401 而無限轉址。
+- **登出時設定標記**：即使使用者在 authentik 登出頁之前離開、authentik session 仍在，回到網站也不會立刻自動登入。
+- **`/api/me` 回 200 時清除**：同一分頁內 session 8 小時到期後，仍能再靜默續登。
+- **`auth_error` 時不嘗試**：避免錯誤訊息被立即的轉址蓋掉。
+
+- **為何用 `sessionStorage`**：每個分頁獨立、關閉即清除；不同 port 是不同 origin，site-a 與 site-b 的標記互不影響。
+- **為何非靜默登入收到 `login_required` 仍顯示錯誤**：一般登入不會出現這個錯誤，出現即代表異常，應讓使用者看到。
+- **替代方案**：隱藏 iframe 做靜默檢查，頁面不跳轉。但 authentik 可能以 `X-Frame-Options` 禁止嵌入，瀏覽器的第三方 cookie 限制也可能讓 iframe 拿不到 authentik session，較易失敗且難除錯。
+- **替代方案**：不自動登入、一律按「登入」（原本的做法）。流程最單純，但 SSO 的效果需要多按一次。
 
 ## Risks / Trade-offs
 
@@ -120,6 +135,8 @@ backend/
 - [兩網站共用同一把簽章金鑰] → 不影響安全性：token 的 `iss`、`aud` 各自不同，後端只接受自己的 issuer 與 client ID。
 - [登出不會同步到另一個網站] → 已列為 Non-goal，README 說明此行為。
 - [authentik 的 end-session 是否支援 `post_logout_redirect_uri` 依版本而定] → 本次不依賴它，登出後停在 authentik 的登出頁面。
+- [未登入時每個新分頁都會先跳去 authentik 再回來] → 每個分頁只嘗試一次，畫面顯示「檢查登入狀態中…」。
+- [authentik 對 `prompt=none` 的實際行為] → 端對端驗證時確認；若回傳的錯誤碼不在預期清單內，會顯示 `access_denied`，方便發現。
 
 ## Open Questions
 

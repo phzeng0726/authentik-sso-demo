@@ -1,15 +1,23 @@
 ## ADDED Requirements
 
 ### Requirement: Start login
-The backend SHALL expose `GET /api/auth/login`, which starts an OIDC Authorization Code Flow with PKCE (`S256`) against the configured authentik issuer. It SHALL generate a random `state`, `nonce`, and PKCE code verifier, store them server-side as a pending login that expires after 10 minutes, set an HttpOnly login-flow cookie that identifies the pending login, and respond with HTTP 302 to the authorization endpoint with `scope=openid profile email`.
+The backend SHALL expose `GET /api/auth/login`, which starts an OIDC Authorization Code Flow with PKCE (`S256`) against the configured authentik issuer. It SHALL generate a random `state`, `nonce`, and PKCE code verifier, store them server-side as a pending login that expires after 10 minutes, set an HttpOnly login-flow cookie that identifies the pending login, and respond with HTTP 302 to the authorization endpoint with `scope=openid profile email`. When the request has the query parameter `prompt=none`, the backend SHALL also send `prompt=none` to authentik and mark the pending login as silent; any other `prompt` value SHALL be ignored.
 
 #### Scenario: User starts login
 - **WHEN** a client sends `GET /api/auth/login`
-- **THEN** the backend responds with HTTP 302 whose `Location` is the authorization endpoint with `response_type=code`, the configured `client_id` and `redirect_uri`, `scope=openid profile email`, a `state`, a `nonce`, `code_challenge_method=S256`, and a `code_challenge`
+- **THEN** the backend responds with HTTP 302 whose `Location` is the authorization endpoint with `response_type=code`, the configured `client_id` and `redirect_uri`, `scope=openid profile email`, a `state`, a `nonce`, `code_challenge_method=S256`, and a `code_challenge`, and without `prompt`
 - **AND** the response sets the login-flow cookie with `HttpOnly`, `SameSite=Lax`, and `Path=/api/auth`
 
+#### Scenario: Silent login requested
+- **WHEN** a client sends `GET /api/auth/login?prompt=none`
+- **THEN** the redirect `Location` also contains `prompt=none`, and the pending login is marked as silent
+
+#### Scenario: Other prompt values ignored
+- **WHEN** a client sends `GET /api/auth/login?prompt=login`
+- **THEN** the redirect `Location` does not contain `prompt`, and the pending login is not marked as silent
+
 ### Requirement: Handle login callback
-The backend SHALL expose `GET /api/auth/callback`. It SHALL accept the callback only when the login-flow cookie refers to an unexpired pending login and the `state` query parameter equals that login's `state`. It SHALL exchange the `code` for tokens using the PKCE code verifier, verify the ID token (signature, issuer, audience, expiry) and that its `nonce` equals the pending login's `nonce`. On success it SHALL create a session, set the session cookie, delete the pending login and the login-flow cookie, and respond with HTTP 302 to `/`. On any failure it SHALL NOT create a session and SHALL respond with HTTP 302 to `/?auth_error=<code>`.
+The backend SHALL expose `GET /api/auth/callback`. It SHALL accept the callback only when the login-flow cookie refers to an unexpired pending login and the `state` query parameter equals that login's `state`. It SHALL exchange the `code` for tokens using the PKCE code verifier, verify the ID token (signature, issuer, audience, expiry) and that its `nonce` equals the pending login's `nonce`. On success it SHALL create a session, set the session cookie, delete the pending login and the login-flow cookie, and respond with HTTP 302 to `/`. On any failure it SHALL NOT create a session and SHALL respond with HTTP 302 to `/?auth_error=<code>`, except that when a silent pending login comes back with `error` equal to `login_required`, `consent_required`, or `interaction_required`, the backend SHALL respond with HTTP 302 to `/` without `auth_error`, because the user is simply not signed in at authentik.
 
 #### Scenario: Successful callback
 - **WHEN** authentik redirects to `/api/auth/callback?code=<valid>&state=<matching>` with a valid login-flow cookie
@@ -25,6 +33,18 @@ The backend SHALL expose `GET /api/auth/callback`. It SHALL accept the callback 
 
 #### Scenario: Authentik returns an error
 - **WHEN** the callback contains an `error` query parameter (for example, the user denied access)
+- **THEN** the backend responds with HTTP 302 to `/?auth_error=access_denied`
+
+#### Scenario: Silent login without an authentik session
+- **WHEN** a silent login's callback contains `error=login_required` with a matching `state`
+- **THEN** the backend responds with HTTP 302 to `/` (no `auth_error`) and does not set a session cookie
+
+#### Scenario: Silent login with another error
+- **WHEN** a silent login's callback contains `error=server_error` with a matching `state`
+- **THEN** the backend responds with HTTP 302 to `/?auth_error=access_denied`
+
+#### Scenario: Interactive login with login_required
+- **WHEN** a non-silent login's callback contains `error=login_required` with a matching `state`
 - **THEN** the backend responds with HTTP 302 to `/?auth_error=access_denied`
 
 #### Scenario: Token exchange or verification fails

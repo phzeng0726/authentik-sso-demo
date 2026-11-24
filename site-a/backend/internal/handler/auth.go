@@ -27,6 +27,14 @@ const (
 	authErrToken        = "token_error"
 )
 
+// silentNotSignedInErrors are the OIDC errors a prompt=none request returns
+// when the user would have to interact with authentik to sign in.
+var silentNotSignedInErrors = map[string]bool{
+	"login_required":       true,
+	"consent_required":     true,
+	"interaction_required": true,
+}
+
 // MeResponse is the body of GET /api/me.
 type MeResponse struct {
 	Sub      string `json:"sub"`
@@ -53,11 +61,13 @@ func NewAuthHandler(provider auth.Provider, store *auth.Store) *AuthHandler {
 
 // Login starts the Authorization Code Flow: it remembers state, nonce and the
 // PKCE verifier server-side, then redirects the browser to authentik.
+// With ?prompt=none it starts a silent login; other prompt values are ignored.
 func (h *AuthHandler) Login(c *gin.Context) {
-	pending := h.store.CreatePendingLogin(auth.RandomString(), auth.RandomString(), oauth2.GenerateVerifier())
+	silent := c.Query("prompt") == "none"
+	pending := h.store.CreatePendingLogin(auth.RandomString(), auth.RandomString(), oauth2.GenerateVerifier(), silent)
 
 	setCookie(c, LoginFlowCookieName, pending.ID, loginFlowCookiePath, int(auth.PendingLoginTTL.Seconds()))
-	c.Redirect(http.StatusFound, h.provider.AuthCodeURL(pending.State, pending.Nonce, pending.Verifier))
+	c.Redirect(http.StatusFound, h.provider.AuthCodeURL(pending.State, pending.Nonce, pending.Verifier, pending.Silent))
 }
 
 // Callback finishes the login after authentik redirects back with a code.
@@ -72,6 +82,12 @@ func (h *AuthHandler) Callback(c *gin.Context) {
 		return
 	}
 	if e := c.Query("error"); e != "" {
+		// A silent attempt that fails because the user is not signed in at
+		// authentik is expected: go home quietly and let the user click login.
+		if pending.Silent && silentNotSignedInErrors[e] {
+			c.Redirect(http.StatusFound, "/")
+			return
+		}
 		log.Printf("login callback: authentik returned error %q: %s", e, c.Query("error_description"))
 		redirectWithAuthError(c, authErrAccessDenied)
 		return

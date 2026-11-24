@@ -8,7 +8,30 @@ type LogoutResponse = { logout_url: string }
 type State =
   | { kind: 'loading' }
   | { kind: 'error' }
+  | { kind: 'silent-login' }
   | { kind: 'ready'; name: string; status: string; user: User | null }
+
+// Marks that this tab already tried a silent login (prompt=none), so a failed
+// attempt does not redirect forever. sessionStorage is per tab and per origin,
+// so site-a and site-b (different ports) keep separate marks.
+const SILENT_LOGIN_KEY = 'silentLoginTried'
+
+function hasTriedSilentLogin(): boolean {
+  try {
+    return sessionStorage.getItem(SILENT_LOGIN_KEY) !== null
+  } catch {
+    return true // storage unavailable: never auto-redirect
+  }
+}
+
+function setSilentLoginTried(tried: boolean) {
+  try {
+    if (tried) sessionStorage.setItem(SILENT_LOGIN_KEY, '1')
+    else sessionStorage.removeItem(SILENT_LOGIN_KEY)
+  } catch {
+    // storage unavailable: nothing to remember
+  }
+}
 
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
   invalid_state: '登入流程已逾時或無效，請重新登入。',
@@ -45,9 +68,13 @@ function takeAuthError(): string | null {
   return AUTH_ERROR_MESSAGES[code] ?? '登入失敗，請重新登入。'
 }
 
+// Read once at module load: a useState initializer may run twice under
+// StrictMode, and the second run would no longer see the removed parameter.
+const initialAuthError = takeAuthError()
+
 function App() {
   const [state, setState] = useState<State>({ kind: 'loading' })
-  const [authError, setAuthError] = useState<string | null>(takeAuthError)
+  const [authError, setAuthError] = useState<string | null>(initialAuthError)
   const [loggingOut, setLoggingOut] = useState(false)
 
   useEffect(() => {
@@ -59,6 +86,17 @@ function App() {
       getMe(controller.signal),
     ])
       .then(([info, health, user]) => {
+        if (user) {
+          // Signed in: allow a silent login again once this session expires.
+          setSilentLoginTried(false)
+        } else if (initialAuthError === null && !hasTriedSilentLogin()) {
+          // Not signed in here: ask authentik whether the user is signed in
+          // already (e.g. on the other site). Only once per tab.
+          setSilentLoginTried(true)
+          setState({ kind: 'silent-login' })
+          window.location.href = '/api/auth/login?prompt=none'
+          return
+        }
         setState({ kind: 'ready', name: info.name, status: health.status, user })
       })
       .catch((err: unknown) => {
@@ -77,6 +115,9 @@ function App() {
   }
 
   const logout = async () => {
+    // Coming back after logout must not sign in again silently, even if the
+    // user leaves authentik's logout page before it ends the authentik session.
+    setSilentLoginTried(true)
     setLoggingOut(true)
     try {
       const res = await fetch('/api/auth/logout', { method: 'POST' })
@@ -103,6 +144,13 @@ function App() {
           <div className="flex items-center gap-3 text-slate-500" role="status">
             <span className="size-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
             載入中…
+          </div>
+        )}
+
+        {state.kind === 'silent-login' && (
+          <div className="flex items-center gap-3 text-slate-500" role="status">
+            <span className="size-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+            檢查登入狀態中…
           </div>
         )}
 

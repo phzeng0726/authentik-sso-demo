@@ -143,7 +143,7 @@ func (s *ProviderSuite) TestNewOIDCProvider_DiscoveryFails_ReturnsError() {
 }
 
 func (s *ProviderSuite) TestAuthCodeURL_ContainsAllParameters() {
-	raw := s.provider.AuthCodeURL("state-1", "nonce-1", "verifier-1")
+	raw := s.provider.AuthCodeURL("state-1", "nonce-1", "verifier-1", false)
 
 	u, err := url.Parse(raw)
 	s.Require().NoError(err)
@@ -159,6 +159,19 @@ func (s *ProviderSuite) TestAuthCodeURL_ContainsAllParameters() {
 	s.Equal("S256", q.Get("code_challenge_method"))
 	// S256 challenge of "verifier-1" = base64url(sha256("verifier-1")), computed with:
 	// printf 'verifier-1' | openssl dgst -sha256 -binary | base64 | tr '+/' '-_' | tr -d '='
+	s.Equal("xTYRBLTDt1gS3-rw_3FBVafZ0iNg9bZYBbG8fRPvkEs", q.Get("code_challenge"))
+	s.False(q.Has("prompt"))
+}
+
+func (s *ProviderSuite) TestAuthCodeURL_Silent_AddsPromptNone() {
+	raw := s.provider.AuthCodeURL("state-1", "nonce-1", "verifier-1", true)
+
+	u, err := url.Parse(raw)
+	s.Require().NoError(err)
+	q := u.Query()
+	s.Equal("none", q.Get("prompt"))
+	s.Equal("state-1", q.Get("state"))
+	s.Equal("nonce-1", q.Get("nonce"))
 	s.Equal("xTYRBLTDt1gS3-rw_3FBVafZ0iNg9bZYBbG8fRPvkEs", q.Get("code_challenge"))
 }
 

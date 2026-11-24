@@ -66,12 +66,18 @@ func cookieNamed(rec *httptest.ResponseRecorder, name string) *http.Cookie {
 // startLogin runs GET /api/auth/login and returns the login-flow cookie and
 // the state, nonce and verifier passed to the provider.
 func (s *AuthSuite) startLogin() (flow *http.Cookie, state, nonce, verifier string) {
-	s.provider.EXPECT().AuthCodeURL(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(st, n, v string) string {
+	return s.startLoginAt("/api/auth/login", false)
+}
+
+// startLoginAt runs a login request at target and checks that the provider
+// is asked for a silent login exactly when wantSilent is true.
+func (s *AuthSuite) startLoginAt(target string, wantSilent bool) (flow *http.Cookie, state, nonce, verifier string) {
+	s.provider.EXPECT().AuthCodeURL(gomock.Any(), gomock.Any(), gomock.Any(), wantSilent).
+		DoAndReturn(func(st, n, v string, _ bool) string {
 			state, nonce, verifier = st, n, v
 			return "http://idp/authorize?x=1"
 		})
-	rec := s.do(http.MethodGet, "/api/auth/login")
+	rec := s.do(http.MethodGet, target)
 	s.Require().Equal(http.StatusFound, rec.Code)
 	flow = cookieNamed(rec, "site_b_login")
 	s.Require().NotNil(flow)
@@ -86,8 +92,8 @@ func (s *AuthSuite) callback(query url.Values, cookies ...*http.Cookie) *httptes
 
 func (s *AuthSuite) TestLogin_RedirectsToProviderAndStoresPendingLogin() {
 	var gotState, gotNonce, gotVerifier string
-	s.provider.EXPECT().AuthCodeURL(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(state, nonce, verifier string) string {
+	s.provider.EXPECT().AuthCodeURL(gomock.Any(), gomock.Any(), gomock.Any(), false).
+		DoAndReturn(func(state, nonce, verifier string, _ bool) string {
 			gotState, gotNonce, gotVerifier = state, nonce, verifier
 			return "http://idp/authorize?state=" + state
 		})
@@ -113,6 +119,28 @@ func (s *AuthSuite) TestLogin_RedirectsToProviderAndStoresPendingLogin() {
 	s.Equal(gotState, pending.State)
 	s.Equal(gotNonce, pending.Nonce)
 	s.Equal(gotVerifier, pending.Verifier)
+	s.False(pending.Silent)
+}
+
+func (s *AuthSuite) TestLogin_PromptNone_StartsSilentLogin() {
+	flow, state, _, _ := s.startLoginAt("/api/auth/login?prompt=none", true)
+
+	pending, ok := s.store.TakePendingLogin(flow.Value)
+	s.Require().True(ok)
+	s.True(pending.Silent)
+	s.Equal(state, pending.State)
+}
+
+func (s *AuthSuite) TestLogin_OtherPromptValues_AreIgnored() {
+	for _, target := range []string{"/api/auth/login?prompt=login", "/api/auth/login?prompt=", "/api/auth/login?prompt=NONE"} {
+		s.Run(target, func() {
+			flow, _, _, _ := s.startLoginAt(target, false)
+
+			pending, ok := s.store.TakePendingLogin(flow.Value)
+			s.Require().True(ok)
+			s.False(pending.Silent)
+		})
+	}
 }
 
 // --- callback ---
@@ -206,6 +234,63 @@ func (s *AuthSuite) TestCallback_ProviderError_ReturnsAccessDenied() {
 	rec := s.callback(url.Values{"error": {"access_denied"}, "state": {state}}, flow)
 
 	s.assertAuthError(rec, "access_denied")
+}
+
+func (s *AuthSuite) TestCallback_SilentNotSignedIn_GoesHomeWithoutError() {
+	for _, e := range []string{"login_required", "consent_required", "interaction_required"} {
+		s.Run(e, func() {
+			flow, state, _, _ := s.startLoginAt("/api/auth/login?prompt=none", true)
+
+			rec := s.callback(url.Values{"error": {e}, "state": {state}}, flow)
+
+			s.Equal(http.StatusFound, rec.Code)
+			s.Equal("/", rec.Header().Get("Location"))
+			s.Nil(cookieNamed(rec, "site_b_session"))
+			cleared := cookieNamed(rec, "site_b_login")
+			s.Require().NotNil(cleared)
+			s.Equal(-1, cleared.MaxAge)
+		})
+	}
+}
+
+func (s *AuthSuite) TestCallback_SilentOtherError_ReturnsAccessDenied() {
+	flow, state, _, _ := s.startLoginAt("/api/auth/login?prompt=none", true)
+
+	rec := s.callback(url.Values{"error": {"server_error"}, "state": {state}}, flow)
+
+	s.assertAuthError(rec, "access_denied")
+}
+
+func (s *AuthSuite) TestCallback_InteractiveLoginRequired_ReturnsAccessDenied() {
+	flow, state, _, _ := s.startLogin()
+
+	rec := s.callback(url.Values{"error": {"login_required"}, "state": {state}}, flow)
+
+	s.assertAuthError(rec, "access_denied")
+}
+
+func (s *AuthSuite) TestCallback_SilentStateMismatch_ReturnsInvalidState() {
+	flow, _, _, _ := s.startLoginAt("/api/auth/login?prompt=none", true)
+
+	rec := s.callback(url.Values{"error": {"login_required"}, "state": {"forged"}}, flow)
+
+	s.assertAuthError(rec, "invalid_state")
+}
+
+func (s *AuthSuite) TestCallback_SilentSuccess_CreatesSession() {
+	flow, state, nonce, _ := s.startLoginAt("/api/auth/login?prompt=none", true)
+	s.provider.EXPECT().Exchange(gomock.Any(), "code-1", gomock.Any()).
+		Return(auth.IDToken{Raw: "raw-id-token", User: alice, Nonce: nonce}, nil)
+
+	rec := s.callback(url.Values{"code": {"code-1"}, "state": {state}}, flow)
+
+	s.Equal(http.StatusFound, rec.Code)
+	s.Equal("/", rec.Header().Get("Location"))
+	sc := cookieNamed(rec, "site_b_session")
+	s.Require().NotNil(sc)
+	sess, ok := s.store.GetSession(sc.Value)
+	s.Require().True(ok)
+	s.Equal(alice, sess.User)
 }
 
 func (s *AuthSuite) TestCallback_ExchangeFails_ReturnsTokenError() {

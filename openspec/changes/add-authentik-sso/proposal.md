@@ -13,6 +13,7 @@
 - 新增需要登入才能存取的 API 保護機制（middleware），`/api/health`、`/api/info` 維持公開
 - 後端新增 OIDC 相關環境變數（issuer、client ID、client secret、redirect URL），並支援從後端目錄的 `.env` 檔載入；提供不含真實密鑰的範例檔
 - 前端首頁依登入狀態顯示「登入」按鈕，或使用者資訊與「登出」按鈕；登入失敗時顯示錯誤訊息
+- 靜默登入：前端在未登入時自動以 `prompt=none` 向 authentik 確認登入狀態；若已在另一個網站登入，不需按「登入」即自動登入，否則顯示「登入」按鈕。每個分頁只嘗試一次，登出後不會立刻自動登入
 - `README.md` 補上 authentik 手動設定步驟，並標註哪些步驟之後可以自動化
 - `Makefile` 新增 `authentik-check`，檢查兩個網站的 OIDC discovery 是否正常
 - 後端單元測試遵循 `TESTING_GUIDELINES.md`

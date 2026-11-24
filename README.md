@@ -85,7 +85,7 @@ make dev
 |--------|------|--------|------|
 | GET | `/api/health` | 否 | `{"status":"ok"}` |
 | GET | `/api/info` | 否 | `{"name":"<SITE_NAME>"}` |
-| GET | `/api/auth/login` | 否 | 302 導向 authentik 登入 |
+| GET | `/api/auth/login` | 否 | 302 導向 authentik 登入；加上 `?prompt=none` 為靜默登入 |
 | GET | `/api/auth/callback` | 否 | 登入完成後由 authentik 導回；成功 302 到 `/`，失敗 302 到 `/?auth_error=<code>` |
 | POST | `/api/auth/logout` | 否 | 清除本站 session，回傳 `{"logout_url":"..."}` |
 | GET | `/api/me` | 是 | `{"sub","username","name","email"}`；未登入回 401 `{"error":"unauthorized"}` |
@@ -101,12 +101,22 @@ make dev
 
 Session 存在後端記憶體，8 小時到期，後端重啟會清空。兩個網站的 cookie 名稱不同（`site_a_session`、`site_b_session`），因為同一個 `localhost` 不同 port 會共用 cookie。
 
+### 靜默登入（`prompt=none`）
+
+未登入時，前端會自動整頁導向 `/api/auth/login?prompt=none`（畫面顯示「檢查登入狀態中…」），請 authentik「不要顯示任何畫面，只告訴我使用者是否已登入」：
+
+- **authentik 已有登入 session**（例如剛在另一個網站登入）：直接導回並完成登入，不需按任何按鈕。
+- **沒有 authentik session**：authentik 回傳 `login_required`，後端靜默導回首頁，頁面顯示「登入」按鈕。
+
+每個分頁只嘗試一次（記在 `sessionStorage`），避免無限轉址；按「登出」時也會記下，回到網站不會立刻又自動登入；登入成功後清除記號，session 到期時可再靜默續登。
+
 ## SSO 示範
 
-1. 開啟 site-a（http://localhost:3001），按「登入」，在 authentik 輸入帳密 → 回到 site-a 顯示使用者資訊。
-2. 開啟 site-b（http://localhost:3002），按「登入」→ **不需輸入帳密**，直接回到 site-b 並顯示使用者資訊。這是因為瀏覽器在 authentik 已有登入 session。
+1. 開啟 site-a（http://localhost:3001）→ 自動檢查登入狀態後顯示「登入」按鈕。按「登入」，在 authentik 輸入帳密 → 回到 site-a 顯示使用者資訊。
+2. 開新分頁開啟 site-b（http://localhost:3002）→ **不需按任何按鈕、不需輸入帳密**，自動登入並顯示使用者資訊。這是因為瀏覽器在 authentik 已有登入 session，靜默登入直接成功。
 3. 在 site-a 按「登出」→ site-a 的 session 被清除，並導向 authentik 結束 authentik 的登入 session。
-4. 回到 site-b 重新整理 → **仍是登入狀態**。登出只會清除當前網站的 session，不會同步到另一個網站；但 authentik 的 session 已結束，site-b 下次登入需要重新輸入帳密。
+4. 回到 site-b 重新整理 → **仍是登入狀態**。登出只會清除當前網站的 session，不會同步到另一個網站。
+5. 回到 site-a → 顯示「登入」按鈕，不會自動登入。
 
 ## 測試
 

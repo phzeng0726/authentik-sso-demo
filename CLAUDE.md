@@ -23,6 +23,8 @@ A demo of single sign-on (SSO) between two different websites using authentik.
     - `internal/auth`: `Provider` interface (go-oidc + x/oauth2) with a mockgen mock in `auth/mock` (`go generate ./internal/auth/`), and an in-memory `Store` for sessions (8h) and pending logins (10m) with an injectable clock.
     - `internal/handler`: routes under `/api`; `RequireAuth` middleware protects `/api/me`. Cookies are named per site (`site_a_session`/`site_a_login`, `site_b_*`) because localhost cookies are shared across ports.
     - The backend exits at startup if OIDC discovery fails, so authentik must be running first.
+    - Silent login: `/api/auth/login?prompt=none` marks the pending login `Silent`; the callback sends `login_required`/`consent_required`/`interaction_required` from a silent attempt back to `/` without `auth_error`.
+  - Frontend silent login: on 401 from `/api/me` it redirects once per tab to `/api/auth/login?prompt=none`, tracked by the `silentLoginTried` key in `sessionStorage` (set on attempt and on logout, cleared on 200).
   - When syncing code from site-a to site-b, swap `site-a`/`site-b` and `site_a_`/`site_b_` both ways (tests reference the other site's cookie), and change 8081→8082, 3001→3002, `Site A`→`Site B`, `blue`→`emerald`.
   - `frontend/`: React + TS + Vite + Tailwind v4; Vite proxies `/api` to its own backend. site-a: 3001, site-b: 3002.
 - `openspec/`: OpenSpec specs and change proposals (schema: spec-driven).
