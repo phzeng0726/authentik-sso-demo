@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/suite"
 
+	"site-b/backend/internal/auth"
 	"site-b/backend/internal/config"
 	"site-b/backend/internal/handler"
 )
@@ -24,7 +25,7 @@ func TestHandlerSuite(t *testing.T) {
 }
 
 func (s *HandlerSuite) SetupTest() {
-	s.router = handler.NewRouter(config.Config{Port: 8082, SiteName: "Test Site"})
+	s.router = handler.NewRouter(config.Config{Port: 8082, SiteName: "Test Site"}, nil, auth.NewStore(nil))
 }
 
 func (s *HandlerSuite) do(method, path string) *httptest.ResponseRecorder {
@@ -57,7 +58,7 @@ func (s *HandlerSuite) TestInfo_ReturnsConfiguredSiteName() {
 }
 
 func (s *HandlerSuite) TestInfo_UsesSiteNameFromConfig() {
-	router := handler.NewRouter(config.Config{Port: 8082, SiteName: "Another Site"})
+	router := handler.NewRouter(config.Config{Port: 8082, SiteName: "Another Site"}, nil, auth.NewStore(nil))
 	req := httptest.NewRequest(http.MethodGet, "/api/info", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
