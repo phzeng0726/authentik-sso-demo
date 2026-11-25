@@ -1,11 +1,14 @@
 # authentik-sso-demo
 讓兩個不同網站透過 authentik 實現單點登入
 
+設計理由、驗證結果與 Synology NAS 整合見 [可行性驗證筆記](docs/feasibility-notes.md)。
+
 ## 目錄結構
 
 ```
 .
 ├── authentik/        # authentik（server、worker、PostgreSQL），以 Docker Compose 執行
+├── docs/             # 可行性驗證筆記
 ├── site-a/
 │   ├── backend/      # Go + Gin API
 │   └── frontend/     # React + TypeScript + Vite + Tailwind CSS

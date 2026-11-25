@@ -30,6 +30,7 @@ A demo of single sign-on (SSO) between two different websites using authentik.
   - `frontend/`: React + TS + Vite + Tailwind v4; Vite proxies `/api` to its own backend. site-a: 3001, site-b: 3002.
 - `tools/create-users/`: standalone Go module (stdlib HTTP + godotenv) that bulk-creates authentik users from a CSV via the REST API (`AUTHENTIK_TOKEN` in its `.env`). Skips existing usernames, creates missing groups, generates passwords for blank ones. `users.csv` is gitignored.
 - `openspec/`: OpenSpec specs and change proposals (schema: spec-driven).
+- `docs/feasibility-notes.md`: feasibility evaluation notes (design rationale, what was verified, Synology NAS + AD integration). Commands, env vars and API stay in README; update the notes when a verified result changes.
 
 ## Notes
 
