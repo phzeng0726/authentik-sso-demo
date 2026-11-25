@@ -44,22 +44,24 @@ func (s *ConfigSuite) TestLoad_OnlyRequiredSet_UsesDefaults() {
 		Port:     8082,
 		SiteName: "Site B",
 		OIDC: config.OIDCConfig{
-			Issuer:       "http://localhost:9000/application/o/site-b/",
-			ClientID:     "id",
-			ClientSecret: "secret",
-			RedirectURL:  "http://localhost:3002/api/auth/callback",
+			Issuer:                "http://localhost:9000/application/o/site-b/",
+			ClientID:              "id",
+			ClientSecret:          "secret",
+			RedirectURL:           "http://localhost:3002/api/auth/callback",
+			PostLogoutRedirectURL: "http://localhost:3002/",
 		},
 	}, cfg)
 }
 
 func (s *ConfigSuite) TestLoad_AllSet_UsesValues() {
 	cfg, err := config.Load(envOf(map[string]string{
-		"PORT":               "9100",
-		"SITE_NAME":          "Custom",
-		"OIDC_ISSUER":        "http://idp/",
-		"OIDC_REDIRECT_URL":  "http://app/cb",
-		"OIDC_CLIENT_ID":     "my-id",
-		"OIDC_CLIENT_SECRET": "my-secret",
+		"PORT":                          "9100",
+		"SITE_NAME":                     "Custom",
+		"OIDC_ISSUER":                   "http://idp/",
+		"OIDC_REDIRECT_URL":             "http://app/cb",
+		"OIDC_POST_LOGOUT_REDIRECT_URL": "http://app/",
+		"OIDC_CLIENT_ID":                "my-id",
+		"OIDC_CLIENT_SECRET":            "my-secret",
 	}))
 
 	s.Require().NoError(err)
@@ -67,20 +69,22 @@ func (s *ConfigSuite) TestLoad_AllSet_UsesValues() {
 		Port:     9100,
 		SiteName: "Custom",
 		OIDC: config.OIDCConfig{
-			Issuer:       "http://idp/",
-			ClientID:     "my-id",
-			ClientSecret: "my-secret",
-			RedirectURL:  "http://app/cb",
+			Issuer:                "http://idp/",
+			ClientID:              "my-id",
+			ClientSecret:          "my-secret",
+			RedirectURL:           "http://app/cb",
+			PostLogoutRedirectURL: "http://app/",
 		},
 	}, cfg)
 }
 
 func (s *ConfigSuite) TestLoad_EmptyOptionalValues_UsesDefaults() {
 	cfg, err := config.Load(envOf(withRequired(map[string]string{
-		"PORT":              "",
-		"SITE_NAME":         "",
-		"OIDC_ISSUER":       "",
-		"OIDC_REDIRECT_URL": "",
+		"PORT":                          "",
+		"SITE_NAME":                     "",
+		"OIDC_ISSUER":                   "",
+		"OIDC_REDIRECT_URL":             "",
+		"OIDC_POST_LOGOUT_REDIRECT_URL": "",
 	})))
 
 	s.Require().NoError(err)
@@ -88,6 +92,7 @@ func (s *ConfigSuite) TestLoad_EmptyOptionalValues_UsesDefaults() {
 	s.Equal("Site B", cfg.SiteName)
 	s.Equal("http://localhost:9000/application/o/site-b/", cfg.OIDC.Issuer)
 	s.Equal("http://localhost:3002/api/auth/callback", cfg.OIDC.RedirectURL)
+	s.Equal("http://localhost:3002/", cfg.OIDC.PostLogoutRedirectURL)
 }
 
 func (s *ConfigSuite) TestLoad_PortBoundaries_Valid() {

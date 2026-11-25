@@ -8,29 +8,15 @@ type LogoutResponse = { logout_url: string }
 type State =
   | { kind: 'loading' }
   | { kind: 'error' }
-  | { kind: 'silent-login' }
+  | { kind: 'redirecting' }
+  // user is null only after a failed login (auth_error), where the page offers a retry.
   | { kind: 'ready'; name: string; status: string; user: User | null }
 
-// Marks that this tab already tried a silent login (prompt=none), so a failed
-// attempt does not redirect forever. sessionStorage is per tab and per origin,
-// so site-a and site-b (different ports) keep separate marks.
-const SILENT_LOGIN_KEY = 'silentLoginTried'
-
-function hasTriedSilentLogin(): boolean {
-  try {
-    return sessionStorage.getItem(SILENT_LOGIN_KEY) !== null
-  } catch {
-    return true // storage unavailable: never auto-redirect
-  }
-}
-
-function setSilentLoginTried(tried: boolean) {
-  try {
-    if (tried) sessionStorage.setItem(SILENT_LOGIN_KEY, '1')
-    else sessionStorage.removeItem(SILENT_LOGIN_KEY)
-  } catch {
-    // storage unavailable: nothing to remember
-  }
+// Login must be a full-page navigation: the backend redirects to authentik,
+// which fetch() cannot follow across origins. authentik signs the user in at
+// once when it already has a session, and shows its login page otherwise.
+function goToLogin() {
+  window.location.href = '/api/auth/login'
 }
 
 const AUTH_ERROR_MESSAGES: Record<string, string> = {
@@ -86,15 +72,11 @@ function App() {
       getMe(controller.signal),
     ])
       .then(([info, health, user]) => {
-        if (user) {
-          // Signed in: allow a silent login again once this session expires.
-          setSilentLoginTried(false)
-        } else if (initialAuthError === null && !hasTriedSilentLogin()) {
-          // Not signed in here: ask authentik whether the user is signed in
-          // already (e.g. on the other site). Only once per tab.
-          setSilentLoginTried(true)
-          setState({ kind: 'silent-login' })
-          window.location.href = '/api/auth/login?prompt=none'
+        // Not signed in: hand over to authentik, unless the last login just
+        // failed (auth_error), which would otherwise redirect forever.
+        if (!user && initialAuthError === null) {
+          setState({ kind: 'redirecting' })
+          goToLogin()
           return
         }
         setState({ kind: 'ready', name: info.name, status: health.status, user })
@@ -108,16 +90,9 @@ function App() {
     return () => controller.abort()
   }, [])
 
-  // Login must be a full-page navigation: the backend redirects to authentik,
-  // which fetch() cannot follow across origins.
-  const login = () => {
-    window.location.href = '/api/auth/login'
-  }
-
+  // authentik ends its session and redirects back here; /api/me then returns
+  // 401 and the page goes to authentik's login page.
   const logout = async () => {
-    // Coming back after logout must not sign in again silently, even if the
-    // user leaves authentik's logout page before it ends the authentik session.
-    setSilentLoginTried(true)
     setLoggingOut(true)
     try {
       const res = await fetch('/api/auth/logout', { method: 'POST' })
@@ -147,10 +122,10 @@ function App() {
           </div>
         )}
 
-        {state.kind === 'silent-login' && (
+        {state.kind === 'redirecting' && (
           <div className="flex items-center gap-3 text-slate-500" role="status">
             <span className="size-5 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
-            檢查登入狀態中…
+            前往登入頁…
           </div>
         )}
 
@@ -202,10 +177,10 @@ function App() {
                   <p className="text-slate-600">尚未登入</p>
                   <button
                     type="button"
-                    onClick={login}
+                    onClick={goToLogin}
                     className="mt-4 w-full rounded-lg bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-700"
                   >
-                    登入
+                    重新登入
                   </button>
                 </>
               )}

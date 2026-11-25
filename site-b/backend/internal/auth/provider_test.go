@@ -124,10 +124,11 @@ func TestProviderSuite(t *testing.T) {
 func (s *ProviderSuite) SetupTest() {
 	s.idp = newFakeIDP(s.T())
 	p, err := auth.NewOIDCProvider(context.Background(), config.OIDCConfig{
-		Issuer:       s.idp.issuer(),
-		ClientID:     "client-1",
-		ClientSecret: "secret-1",
-		RedirectURL:  "http://localhost:3002/api/auth/callback",
+		Issuer:                s.idp.issuer(),
+		ClientID:              "client-1",
+		ClientSecret:          "secret-1",
+		RedirectURL:           "http://localhost:3002/api/auth/callback",
+		PostLogoutRedirectURL: "http://localhost:3002/",
 	})
 	s.Require().NoError(err)
 	s.provider = p
@@ -143,7 +144,7 @@ func (s *ProviderSuite) TestNewOIDCProvider_DiscoveryFails_ReturnsError() {
 }
 
 func (s *ProviderSuite) TestAuthCodeURL_ContainsAllParameters() {
-	raw := s.provider.AuthCodeURL("state-1", "nonce-1", "verifier-1", false)
+	raw := s.provider.AuthCodeURL("state-1", "nonce-1", "verifier-1")
 
 	u, err := url.Parse(raw)
 	s.Require().NoError(err)
@@ -161,18 +162,6 @@ func (s *ProviderSuite) TestAuthCodeURL_ContainsAllParameters() {
 	// printf 'verifier-1' | openssl dgst -sha256 -binary | base64 | tr '+/' '-_' | tr -d '='
 	s.Equal("xTYRBLTDt1gS3-rw_3FBVafZ0iNg9bZYBbG8fRPvkEs", q.Get("code_challenge"))
 	s.False(q.Has("prompt"))
-}
-
-func (s *ProviderSuite) TestAuthCodeURL_Silent_AddsPromptNone() {
-	raw := s.provider.AuthCodeURL("state-1", "nonce-1", "verifier-1", true)
-
-	u, err := url.Parse(raw)
-	s.Require().NoError(err)
-	q := u.Query()
-	s.Equal("none", q.Get("prompt"))
-	s.Equal("state-1", q.Get("state"))
-	s.Equal("nonce-1", q.Get("nonce"))
-	s.Equal("xTYRBLTDt1gS3-rw_3FBVafZ0iNg9bZYBbG8fRPvkEs", q.Get("code_challenge"))
 }
 
 func (s *ProviderSuite) TestExchange_Success_ReturnsVerifiedToken() {
@@ -234,7 +223,55 @@ func (s *ProviderSuite) TestExchange_InvalidIDToken_ReturnsErrInvalidIDToken() {
 	}
 }
 
-func (s *ProviderSuite) TestEndSessionURL() {
+func (s *ProviderSuite) TestEndSessionURL_UsesConfiguredPostLogoutRedirect() {
 	s.Equal(s.idp.server.URL+"/end-session/", s.provider.EndSessionURL(""))
-	s.Equal(s.idp.server.URL+"/end-session/?id_token_hint=tok-1", s.provider.EndSessionURL("tok-1"))
+	s.Equal(
+		s.idp.server.URL+"/end-session/?id_token_hint=tok-1&post_logout_redirect_uri=http%3A%2F%2Flocalhost%3A3002%2F",
+		s.provider.EndSessionURL("tok-1"),
+	)
+}
+
+func (s *ProviderSuite) TestBuildEndSessionURL() {
+	cases := []struct {
+		name     string
+		endpoint string
+		hint     string
+		redirect string
+		want     string
+	}{
+		{
+			name:     "with hint",
+			endpoint: "http://idp/end-session/",
+			hint:     "tok-1",
+			redirect: "http://app/",
+			want:     "http://idp/end-session/?id_token_hint=tok-1&post_logout_redirect_uri=http%3A%2F%2Fapp%2F",
+		},
+		{
+			name:     "without hint drops the redirect",
+			endpoint: "http://idp/end-session/",
+			hint:     "",
+			redirect: "http://app/",
+			want:     "http://idp/end-session/",
+		},
+		{
+			name:     "with hint and empty redirect",
+			endpoint: "http://idp/end-session/",
+			hint:     "tok-1",
+			redirect: "",
+			want:     "http://idp/end-session/?id_token_hint=tok-1",
+		},
+		{
+			name:     "endpoint already has a query",
+			endpoint: "http://idp/end-session/?a=1",
+			hint:     "tok-1",
+			redirect: "http://app/",
+			want:     "http://idp/end-session/?a=1&id_token_hint=tok-1&post_logout_redirect_uri=http%3A%2F%2Fapp%2F",
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			s.Equal(tc.want, auth.BuildEndSessionURL(tc.endpoint, tc.hint, tc.redirect))
+		})
+	}
 }

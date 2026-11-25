@@ -17,6 +17,9 @@ const (
 	DefaultOIDCIssuer = "http://localhost:9000/application/o/site-b/"
 	// DefaultOIDCRedirectURL is the callback URL used when OIDC_REDIRECT_URL is unset or empty.
 	DefaultOIDCRedirectURL = "http://localhost:3002/api/auth/callback"
+	// DefaultOIDCPostLogoutRedirectURL is where authentik returns after logout when
+	// OIDC_POST_LOGOUT_REDIRECT_URL is unset or empty.
+	DefaultOIDCPostLogoutRedirectURL = "http://localhost:3002/"
 
 	minPort = 1
 	maxPort = 65535
@@ -42,6 +45,8 @@ type OIDCConfig struct {
 	ClientID     string
 	ClientSecret string
 	RedirectURL  string
+	// PostLogoutRedirectURL is sent as post_logout_redirect_uri on logout.
+	PostLogoutRedirectURL string
 }
 
 // LookupFunc reports the value of an environment variable and whether it is set.
@@ -66,10 +71,11 @@ func Load(lookup LookupFunc) (Config, error) {
 		Port:     DefaultPort,
 		SiteName: get("SITE_NAME", DefaultSiteName),
 		OIDC: OIDCConfig{
-			Issuer:       get("OIDC_ISSUER", DefaultOIDCIssuer),
-			ClientID:     get("OIDC_CLIENT_ID", ""),
-			ClientSecret: get("OIDC_CLIENT_SECRET", ""),
-			RedirectURL:  get("OIDC_REDIRECT_URL", DefaultOIDCRedirectURL),
+			Issuer:                get("OIDC_ISSUER", DefaultOIDCIssuer),
+			ClientID:              get("OIDC_CLIENT_ID", ""),
+			ClientSecret:          get("OIDC_CLIENT_SECRET", ""),
+			RedirectURL:           get("OIDC_REDIRECT_URL", DefaultOIDCRedirectURL),
+			PostLogoutRedirectURL: get("OIDC_POST_LOGOUT_REDIRECT_URL", DefaultOIDCPostLogoutRedirectURL),
 		},
 	}
 

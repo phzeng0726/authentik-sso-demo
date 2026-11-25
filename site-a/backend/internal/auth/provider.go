@@ -32,22 +32,24 @@ type IDToken struct {
 type Provider interface {
 	// AuthCodeURL returns the authorization endpoint URL that starts a login
 	// with the given state, nonce and PKCE verifier (sent as an S256 challenge).
-	// When silent is true it adds prompt=none: authentik must not show any
-	// page, and either signs the user in at once or returns an error.
-	AuthCodeURL(state, nonce, verifier string, silent bool) string
+	// It sends no prompt: authentik signs the user in at once when it already
+	// has a session, and shows its login page otherwise.
+	AuthCodeURL(state, nonce, verifier string) string
 	// Exchange redeems the authorization code with the PKCE verifier, then
 	// verifies the returned ID token (signature, issuer, audience, expiry).
 	// It does not check the nonce; the caller compares IDToken.Nonce.
 	Exchange(ctx context.Context, code, verifier string) (IDToken, error)
-	// EndSessionURL returns the logout URL, with id_token_hint when not empty.
+	// EndSessionURL returns the logout URL. When idTokenHint is not empty it
+	// adds id_token_hint and the configured post_logout_redirect_uri.
 	EndSessionURL(idTokenHint string) string
 }
 
 // OIDCProvider implements Provider with go-oidc and x/oauth2.
 type OIDCProvider struct {
-	oauth      oauth2.Config
-	verifier   *oidc.IDTokenVerifier
-	endSession string
+	oauth              oauth2.Config
+	verifier           *oidc.IDTokenVerifier
+	endSession         string
+	postLogoutRedirect string
 }
 
 // NewOIDCProvider fetches the discovery document from cfg.Issuer and builds the provider.
@@ -72,18 +74,15 @@ func NewOIDCProvider(ctx context.Context, cfg config.OIDCConfig) (*OIDCProvider,
 			RedirectURL:  cfg.RedirectURL,
 			Scopes:       []string{oidc.ScopeOpenID, "profile", "email"},
 		},
-		verifier:   p.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
-		endSession: meta.EndSessionEndpoint,
+		verifier:           p.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
+		endSession:         meta.EndSessionEndpoint,
+		postLogoutRedirect: cfg.PostLogoutRedirectURL,
 	}, nil
 }
 
 // AuthCodeURL implements Provider.
-func (p *OIDCProvider) AuthCodeURL(state, nonce, verifier string, silent bool) string {
-	opts := []oauth2.AuthCodeOption{oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier)}
-	if silent {
-		opts = append(opts, oauth2.SetAuthURLParam("prompt", "none"))
-	}
-	return p.oauth.AuthCodeURL(state, opts...)
+func (p *OIDCProvider) AuthCodeURL(state, nonce, verifier string) string {
+	return p.oauth.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier))
 }
 
 // Exchange implements Provider.
@@ -126,11 +125,14 @@ func (p *OIDCProvider) Exchange(ctx context.Context, code, verifier string) (IDT
 
 // EndSessionURL implements Provider.
 func (p *OIDCProvider) EndSessionURL(idTokenHint string) string {
-	return BuildEndSessionURL(p.endSession, idTokenHint)
+	return BuildEndSessionURL(p.endSession, idTokenHint, p.postLogoutRedirect)
 }
 
-// BuildEndSessionURL adds id_token_hint to endpoint when hint is not empty.
-func BuildEndSessionURL(endpoint, hint string) string {
+// BuildEndSessionURL adds id_token_hint and post_logout_redirect_uri to
+// endpoint when hint is not empty. Without a hint it returns endpoint as is,
+// because the IdP may reject post_logout_redirect_uri without id_token_hint.
+// An empty postLogoutRedirect is left out.
+func BuildEndSessionURL(endpoint, hint, postLogoutRedirect string) string {
 	if hint == "" {
 		return endpoint
 	}
@@ -140,6 +142,9 @@ func BuildEndSessionURL(endpoint, hint string) string {
 	}
 	q := u.Query()
 	q.Set("id_token_hint", hint)
+	if postLogoutRedirect != "" {
+		q.Set("post_logout_redirect_uri", postLogoutRedirect)
+	}
 	u.RawQuery = q.Encode()
 	return u.String()
 }

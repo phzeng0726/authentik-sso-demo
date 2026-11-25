@@ -108,13 +108,12 @@ func (s *StoreSuite) TestDeleteSession_RemovesOnlyThatSession() {
 }
 
 func (s *StoreSuite) TestCreatePendingLogin_ThenTake_ReturnsValues() {
-	created := s.store.CreatePendingLogin("state-1", "nonce-1", "verifier-1", false)
+	created := s.store.CreatePendingLogin("state-1", "nonce-1", "verifier-1")
 
 	s.Len(created.ID, 43)
 	s.Equal("state-1", created.State)
 	s.Equal("nonce-1", created.Nonce)
 	s.Equal("verifier-1", created.Verifier)
-	s.False(created.Silent)
 	s.Equal(s.now, created.CreatedAt)
 
 	got, ok := s.store.TakePendingLogin(created.ID)
@@ -122,17 +121,8 @@ func (s *StoreSuite) TestCreatePendingLogin_ThenTake_ReturnsValues() {
 	s.Equal(created, got)
 }
 
-func (s *StoreSuite) TestCreatePendingLogin_Silent_IsKept() {
-	created := s.store.CreatePendingLogin("state-1", "nonce-1", "verifier-1", true)
-
-	got, ok := s.store.TakePendingLogin(created.ID)
-	s.Require().True(ok)
-	s.True(got.Silent)
-	s.Equal(created, got)
-}
-
 func (s *StoreSuite) TestTakePendingLogin_CanOnlyBeUsedOnce() {
-	created := s.store.CreatePendingLogin("state-1", "nonce-1", "verifier-1", false)
+	created := s.store.CreatePendingLogin("state-1", "nonce-1", "verifier-1")
 	_, _ = s.store.TakePendingLogin(created.ID)
 
 	got, ok := s.store.TakePendingLogin(created.ID)
@@ -161,7 +151,7 @@ func (s *StoreSuite) TestTakePendingLogin_ExpiryBoundaries() {
 	for _, tc := range cases {
 		s.Run(tc.name, func() {
 			s.SetupTest()
-			created := s.store.CreatePendingLogin("state-1", "nonce-1", "verifier-1", false)
+			created := s.store.CreatePendingLogin("state-1", "nonce-1", "verifier-1")
 			s.now = s.now.Add(tc.elapsed)
 
 			got, ok := s.store.TakePendingLogin(created.ID)

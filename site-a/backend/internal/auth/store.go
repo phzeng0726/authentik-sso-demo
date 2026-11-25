@@ -35,13 +35,11 @@ type Session struct {
 // PendingLogin holds the values generated when a login starts, which the
 // callback must check: state (against CSRF), nonce (against ID token replay)
 // and the PKCE verifier (proves the same client is redeeming the code).
-// Silent marks a prompt=none attempt, whose "not signed in" errors are expected.
 type PendingLogin struct {
 	ID        string
 	State     string
 	Nonce     string
 	Verifier  string
-	Silent    bool
 	CreatedAt time.Time
 }
 
@@ -101,11 +99,11 @@ func (s *Store) DeleteSession(id string) {
 }
 
 // CreatePendingLogin stores the values of a login that has just started.
-func (s *Store) CreatePendingLogin(state, nonce, verifier string, silent bool) PendingLogin {
+func (s *Store) CreatePendingLogin(state, nonce, verifier string) PendingLogin {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	p := PendingLogin{ID: RandomString(), State: state, Nonce: nonce, Verifier: verifier, Silent: silent, CreatedAt: s.now()}
+	p := PendingLogin{ID: RandomString(), State: state, Nonce: nonce, Verifier: verifier, CreatedAt: s.now()}
 	s.pending[p.ID] = p
 	return p
 }
