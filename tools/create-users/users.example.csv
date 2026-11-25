@@ -1,0 +1,4 @@
+username,name,email,password,groups
+alice,Alice Chen,alice@example.com,,site-a-users;site-b-users
+bob,Bob Lin,bob@example.com,Change-Me-123,site-a-users
+carol,,,,

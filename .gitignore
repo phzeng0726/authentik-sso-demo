@@ -29,6 +29,14 @@ go.work.sum
 # env file
 .env
 
+# Users to import with tools/create-users; may hold passwords
+tools/create-users/users.csv
+
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Frontend (Node / Vite)
+node_modules/
+dist/
+*.local
