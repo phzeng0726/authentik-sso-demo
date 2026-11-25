@@ -28,6 +28,7 @@ A demo of single sign-on (SSO) between two different websites using authentik.
   - Frontend has no login button: on 401 from `/api/me` it redirects to `/api/auth/login`, except when the page loaded with `auth_error`, where it shows the error and a "重新登入" button (prevents redirect loops).
   - When syncing code from site-a to site-b, swap `site-a`/`site-b` and `site_a_`/`site_b_` both ways (tests reference the other site's cookie), and change 8081→8082, 3001→3002, `Site A`→`Site B`, `blue`→`emerald`.
   - `frontend/`: React + TS + Vite + Tailwind v4; Vite proxies `/api` to its own backend. site-a: 3001, site-b: 3002.
+- `tools/create-users/`: standalone Go module (stdlib HTTP + godotenv) that bulk-creates authentik users from a CSV via the REST API (`AUTHENTIK_TOKEN` in its `.env`). Skips existing usernames, creates missing groups, generates passwords for blank ones. `users.csv` is gitignored.
 - `openspec/`: OpenSpec specs and change proposals (schema: spec-driven).
 
 ## Notes
